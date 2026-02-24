@@ -21,48 +21,40 @@ def acquerir_donnees_serie(port='/dev/ttyUSB0', baudrate=115200):
     """
     Établit la connexion avec l'ESP32, envoie un signal de départ,
     et collecte exactement N_SAMPLES données brutes.
+    Gère les erreurs de déconnexion et de port matériel.
     """
-    print(f"Tentative de connexion sur le port {port} à {baudrate} bauds...")
+    print(f"\nTentative de connexion au capteur sur le port {port} à {baudrate} bauds...")
     donnees_brutes = []
 
     try:
-        # Configuration et ouverture du port série
         with serial.Serial(port, baudrate, timeout=2) as ser:
-            # L'ouverture du port série redémarre souvent l'Arduino.
-            # On attend 2 secondes pour qu'il soit prêt.
             time.sleep(2)
-
-            print("Envoi du signal d'initialisation...")
-            ser.write(b'START\n')  # Signal convenu avec l'Arduino pour lancer l'échantillonnage
-
+            print("✅ Capteur détecté ! Envoi du signal d'initialisation...")
+            ser.write(b'START\n')
             print(f"Acquisition de {N_SAMPLES} échantillons en cours (~10 secondes)...")
 
             while len(donnees_brutes) < N_SAMPLES:
                 if ser.in_waiting > 0:
-                    # Lecture d'une ligne, décodage et suppression des espaces invisibles (\r\n)
                     ligne = ser.readline().decode('utf-8').strip()
-
                     if ligne:
                         try:
-                            # Conversion de la valeur reçue en nombre flottant
                             valeur = float(ligne)
                             donnees_brutes.append(valeur)
                         except ValueError:
-                            # Si un artefact ou du texte est reçu (ex: message de debug), on l'ignore
-                            print(f"[Avertissement] Ligne ignorée : {ligne}")
+                            pass # On ignore silencieusement les artefacts
 
-            # Envoi du signal d'arrêt pour remettre l'ESP32 en veille
             ser.write(b'STOP\n')
             print("Acquisition terminée avec succès.")
 
     except serial.SerialException as e:
-        print(f"\n[Erreur Critique] Impossible d'ouvrir le port série : {e}")
-        print("Pistes de résolution :")
-        print("1. Vérifiez que la carte est bien branchée.")
-        print("2. Vérifiez le nom du port avec la commande 'ls /dev/tty*' dans le terminal.")
-        print("3. Assurez-vous d'avoir redémarré après vous être ajouté au groupe 'dialout'.")
-        # On retourne un tableau de zéros pour éviter de faire crasher la suite du script
-        return np.zeros(N_SAMPLES)
+        print("\n❌ [ERREUR CRITIQUE] Impossible de communiquer avec le capteur !")
+        print(f"Détails techniques : {e}")
+        print("\n--- Pistes de résolution ---")
+        print("1. Vérifiez que la carte ESP32 est bien branchée en USB.")
+        print("2. Vérifiez le nom du port. Sous Linux, essayez port='/dev/ttyACM0' ou port='/dev/ttyUSB1'.")
+        print("3. Assurez-vous d'avoir redémarré votre PC après avoir configuré le groupe 'dialout'.")
+        print("----------------------------\n")
+        return None  # On retourne None pour signaler l'échec
 
     return np.array(donnees_brutes)
 
@@ -133,15 +125,60 @@ def compenser_perte_charge(debit):
     return debit_compense
 
 
+def calculer_frequence_coupure_fft(signal_debit, fs):
+    """
+    Calcule la fréquence de coupure dynamique en utilisant la FFT.
+    Trouve la fréquence qui contient 90% de la puissance du signal.
+    """
+    N = len(signal_debit)
+    
+    # 1. Centrer le signal pour éviter un pic continu (DC) énorme à 0 Hz
+    signal_centre = signal_debit - np.mean(signal_debit)
+    
+    # 2. Calcul de la FFT
+    fft_valeurs = np.fft.fft(signal_centre)
+    fft_freqs = np.fft.fftfreq(N, 1/fs)
+    
+    # 3. Prendre seulement le spectre unilatéral (fréquences positives)
+    demi_N = N // 2
+    fft_valeurs = fft_valeurs[:demi_N]
+    fft_freqs = fft_freqs[:demi_N]
+    
+    # 4. Calcul de la puissance (amplitude au carré)
+    puissance = np.abs(fft_valeurs) ** 2
+    
+    # 5. Puissance cumulative
+    puissance_cumulative = np.cumsum(puissance)
+    puissance_totale = puissance_cumulative[-1]
+    
+    # 6. Trouver l'indice où la puissance cumulative atteint 90%
+    seuil_90 = 0.90 * puissance_totale
+    indice_90 = np.argmax(puissance_cumulative >= seuil_90)
+    
+    fc_dynamique = fft_freqs[indice_90]
+    
+    # Sécurité : limiter la fréquence de coupure à des valeurs physiologiques
+    if fc_dynamique < 1.0:
+        fc_dynamique = 1.0
+    elif fc_dynamique > 50.0:
+        fc_dynamique = 50.0
+        
+    return fc_dynamique
+
+
 def filtrer_signal(debit):
     """
-    Applique un filtre passe-bas de Butterworth du 4ème ordre avec un filtrage à phase nulle.
+    Identifie dynamiquement la fréquence de coupure via FFT,
+    puis applique un filtre passe-bas de Butterworth du 4ème ordre.
     """
-    # Identifier la fréquence de coupure (90% de la puissance via FFT)
-    # ...
-    fc = 15.0  # Exemple arbitraire, à calculer dynamiquement
+    # 1. Identifier la fréquence de coupure dynamique (90% de la puissance via FFT)
+    fc = calculer_frequence_coupure_fft(debit, FE)
+    print(f"Fréquence de coupure calculée via FFT : {fc:.2f} Hz")
+    
+    # 2. Appliquer le filtre de Butterworth avec filtrage à phase nulle
     sos = signal.butter(4, fc, 'low', fs=FE, output='sos')
-    debit_filtre = signal.sosfiltfilt(sos, debit)  # Filtrage à phase nulle
+    debit_filtre = signal.sosfiltfilt(sos, debit) 
+    
     return debit_filtre
 
 
@@ -248,15 +285,152 @@ def generer_donnees_simulees():
     return donnees
 
 
+def calculer_fvc_theorique(age, taille_cm, sexe):
+    """
+    Calcule une estimation simplifiée du FVC théorique attendu (en Litres).
+    (Basé sur des équations spirométriques standards simplifiées de l'ERS/ATS)
+    """
+    taille_m = taille_cm / 100.0
+    if sexe.lower() == 'homme':
+        # Formule simplifiée pour homme
+        fvc_pred = (5.76 * taille_m) - (0.026 * age) - 4.34
+    elif sexe.lower() == 'femme':
+        # Formule simplifiée pour femme
+        fvc_pred = (4.43 * taille_m) - (0.026 * age) - 2.89
+    else:
+        fvc_pred = None
+    
+    return fvc_pred
+
+
+
+def diagnostiquer_patient(fvc, fev1, fvc_pred=None):
+    """
+    Génère un diagnostic clinique préliminaire basé sur l'indice de Tiffeneau
+    et la comparaison avec le FVC théorique.
+    """
+    if fvc <= 0:
+        return "Erreur : Capacité Vitale (FVC) invalide."
+
+    ratio = (fev1 / fvc) * 100
+
+    print("\n--- ANALYSE CLINIQUE ---")
+    print(f"Indice de Tiffeneau (FEV1/FVC) : {ratio:.1f} %")
+    
+    # 1. Test de l'obstruction
+    if ratio < 70.0:
+        diagnostic = "⚠️ PROFIL OBSTRUCTIF SUSPECTÉ (ex: Asthme, BPCO)."
+        # On peut affiner la sévérité avec le FEV1 par rapport à un FEV1 prédit
+    else:
+        # 2. Test de la restriction (nécessite la valeur théorique)
+        if fvc_pred:
+            pourcentage_fvc = (fvc / fvc_pred) * 100
+            print(f"FVC mesuré vs théorique : {pourcentage_fvc:.1f} %")
+            
+            if pourcentage_fvc < 80.0:
+                diagnostic = "⚠️ PROFIL RESTRICTIF SUSPECTÉ (Capacité pulmonaire réduite)."
+            else:
+                diagnostic = "✅ PROFIL NORMAL (Aucune anomalie respiratoire majeure détectée)."
+        else:
+            diagnostic = "❕ PROFIL NORMAL/INDÉTERMINÉ (Ratio normal, mais FVC théorique manquant pour écarter une restriction)."
+
+    return diagnostic
+
+
+def calculer_fvc_theorique(age, taille_cm, sexe):
+    """
+    Calcule une estimation du FVC théorique attendu (en Litres).
+    Basé sur des équations spirométriques de référence.
+    """
+    taille_m = taille_cm / 100.0
+    if sexe.lower() == 'homme':
+        fvc_pred = (5.76 * taille_m) - (0.026 * age) - 4.34
+    elif sexe.lower() == 'femme':
+        fvc_pred = (4.43 * taille_m) - (0.026 * age) - 2.89
+    else:
+        fvc_pred = None
+    
+    return fvc_pred
+
+def diagnostiquer_patient(fvc, fev1, fvc_pred=None):
+    """
+    Génère un diagnostic clinique préliminaire basé sur l'indice de Tiffeneau
+    et la comparaison avec le FVC théorique.
+    """
+    if fvc <= 0:
+        return "Erreur : Capacité Vitale (FVC) invalide."
+
+    ratio = (fev1 / fvc) * 100
+
+    print("\n--- ANALYSE CLINIQUE PRÉLIMINAIRE ---")
+    
+    # 1. Test du syndrome obstructif
+    if ratio < 70.0:
+        diagnostic = "⚠️ PROFIL OBSTRUCTIF SUSPECTÉ (ex: Asthme, BPCO). Le ratio FEV1/FVC est inférieur à 70%."
+    else:
+        # 2. Test du syndrome restrictif (nécessite la valeur théorique)
+        if fvc_pred:
+            pourcentage_fvc = (fvc / fvc_pred) * 100
+            print(f"FVC mesuré vs théorique : {pourcentage_fvc:.1f} %")
+            
+            if pourcentage_fvc < 80.0:
+                diagnostic = "⚠️ PROFIL RESTRICTIF SUSPECTÉ. Ratio normal, mais Capacité Pulmonaire (FVC) réduite."
+            else:
+                diagnostic = "✅ PROFIL NORMAL. Aucune anomalie respiratoire majeure détectée."
+        else:
+            diagnostic = "❕ PROFIL INDÉTERMINÉ. Ratio normal, mais manque le FVC théorique pour écarter une restriction."
+
+    return diagnostic
+
+
+def demander_informations_patient():
+    """
+    Demande à l'utilisateur de saisir les paramètres physiologiques du patient
+    avec des vérifications de sécurité pour éviter les erreurs de frappe.
+    """
+    print("\n--- INFORMATIONS DU PATIENT ---")
+    
+    while True:
+        try:
+            age = int(input("Entrez l'âge du patient (en années) : "))
+            if age > 0:
+                break
+            else:
+                print("L'âge doit être supérieur à 0.")
+        except ValueError:
+            print("Erreur : Veuillez entrer un nombre entier valide.")
+            
+    while True:
+        try:
+            taille_cm = float(input("Entrez la taille du patient (en cm) : "))
+            if taille_cm > 50:
+                break
+            else:
+                print("La taille semble invalide (doit être > 50 cm).")
+        except ValueError:
+            print("Erreur : Veuillez entrer un nombre valide.")
+            
+    while True:
+        sexe = input("Entrez le sexe biologique du patient (homme/femme) : ").strip().lower()
+        if sexe in ['homme', 'femme']:
+            break
+        print("Erreur : Veuillez taper 'homme' ou 'femme'.")
+        
+    return age, taille_cm, sexe
 
 # --- FLUX D'EXÉCUTION PRINCIPAL ---
 if __name__ == '__main__':
     print("Démarrage du système Spiromètre...")
     
-    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0')   # pour tester sans arduino remplacer avec generer_donnees_simulees()
+    # 1. Saisie des données du patient avant de lancer l'acquisition
+    age_patient, taille_patient, sexe_patient = demander_informations_patient()
+    
+    # 2. Acquisition (simulée ou matérielle)
+    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0')
+    # donnees = generer_donnees_simulees() # pour les tests sans matériel physique
     
     if np.any(donnees):
-        print("Traitement des données en cours...")
+        print("\nTraitement des données en cours...")
         debit = convertir_en_debit(donnees)
         debit_compense = compenser_perte_charge(debit)
         debit_filtre = filtrer_signal(debit_compense)
@@ -267,3 +441,8 @@ if __name__ == '__main__':
         print(f"FEV1 (Volume Expiré en 1s)   : {fev1:.2f} L")
         print(f"PEF (Débit de Pointe)        : {pef:.2f} L/min")
         print(f"Ratio FEV1/FVC               : {(fev1/fvc)*100:.1f} %" if fvc > 0 else "Ratio FEV1/FVC: N/A")
+        
+        # 3. Diagnostic clinique avec les variables saisies
+        fvc_theorique = calculer_fvc_theorique(age=age_patient, taille_cm=taille_patient, sexe=sexe_patient)
+        resultat = diagnostiquer_patient(fvc, fev1, fvc_pred=fvc_theorique)
+        print(resultat)
