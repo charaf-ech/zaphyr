@@ -426,8 +426,14 @@ if __name__ == '__main__':
     age_patient, taille_patient, sexe_patient = demander_informations_patient()
     
     # 2. Acquisition (simulée ou matérielle)
-    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0')
-    # donnees = generer_donnees_simulees() # pour les tests sans matériel physique
+    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0')  # donnees = generer_donnees_simulees() # pour les tests sans matériel physique
+    #Avant de lancer le script, il devra identifier le numéro attribué à la carte ESP32 :
+#Brancher la carte en USB.
+#Faire un clic droit sur le menu Démarrer et ouvrir le Gestionnaire de périphériques.
+#Dérouler la section Ports (COM et LPT).
+#Repérer la ligne correspondant à la carte (souvent appelée USB Serial Device, CH340 ou Silicon Labs CP210x). Le numéro du port sera affiché à côté, par exemple (COM4).(port='COM4')
+
+    
     
     if np.any(donnees):
         print("\nTraitement des données en cours...")
