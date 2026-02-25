@@ -1,6 +1,7 @@
 import serial
 import time
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy import signal
 
 # --- CONSTANTES PHYSIQUES ET MATÉRIELLES ---
@@ -432,6 +433,52 @@ def demander_informations_patient():
         
     return age, taille_cm, sexe
 
+def tracer_courbes_spirometrie(debit_filtre):
+    """
+    Génère et affiche les deux graphiques standards en pneumologie :
+    1. La courbe Volume-Temps
+    2. La courbe Débit-Volume
+    """
+    print("\nGénération des graphiques cliniques en cours...")
+
+    # 1. Création de l'axe du temps (en secondes)
+    temps = np.arange(len(debit_filtre)) / FE
+    
+    # 2. Conversion du débit (m^3/s) en L/s pour l'affichage
+    debit_L_s = debit_filtre * 1000.0
+    
+    # 3. Calcul du volume cumulé en Litres (Intégration du débit)
+    volume_L = np.cumsum(debit_L_s) * (1.0 / FE)
+
+    # 4. Création de la fenêtre avec 2 sous-graphiques
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig.canvas.manager.set_window_title('Analyse Spirométrique - UIASS')
+    
+    # --- GRAPHIQUE 1 : Volume en fonction du Temps ---
+    ax1.plot(temps, volume_L, color='#2ca02c', linewidth=2.5)
+    ax1.set_title('Courbe Volume-Temps\n(Pour observer le FEV1 et FVC)', fontsize=12, fontweight='bold')
+    ax1.set_xlabel('Temps (secondes)', fontsize=11)
+    ax1.set_ylabel('Volume (Litres)', fontsize=11)
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.set_xlim(left=0, right=max(temps[volume_L > 0.1]) + 1 if np.any(volume_L > 0.1) else 10)
+    ax1.set_ylim(bottom=0)
+    ax1.fill_between(temps, volume_L, color='#2ca02c', alpha=0.1)
+
+    # --- GRAPHIQUE 2 : Débit en fonction du Volume ---
+    ax2.plot(volume_L, debit_L_s, color='#1f77b4', linewidth=2.5)
+    ax2.set_title('Courbe Débit-Volume\n(Recherche de syndrome obstructif/restrictif)', fontsize=12, fontweight='bold')
+    ax2.set_xlabel('Volume (Litres)', fontsize=11)
+    ax2.set_ylabel('Débit Expiratoire (L/s)', fontsize=11)
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    ax2.set_xlim(left=0)
+    ax2.set_ylim(bottom=0)
+    ax2.fill_between(volume_L, debit_L_s, color='#1f77b4', alpha=0.1)
+
+    # Affichage à l'écran
+    plt.tight_layout()
+    plt.show()
+
+
 # --- FLUX D'EXÉCUTION PRINCIPAL ---
 if __name__ == '__main__':
     print("Démarrage du système Spiromètre...")
@@ -441,7 +488,7 @@ if __name__ == '__main__':
 
     # 2. Acquisition (simulée ou matérielle)
     # Changez "sain" par "obstructif" ou "restrictif" pour tester l'algorithme !
-    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0') # pour l'acquisition réelle
+    donnees = generer_donnees_simulees(profil="sain") # pour l'acquisition réelle
     # donnees = generer_donnees_simulees(profil="sain") # pour les tests sans matériel physique
     
     #Avant de lancer le script, il devra identifier le numéro attribué à la carte ESP32 :
@@ -469,3 +516,6 @@ if __name__ == '__main__':
         fvc_theorique = calculer_fvc_theorique(age=age_patient, taille_cm=taille_patient, sexe=sexe_patient)
         resultat = diagnostiquer_patient(fvc, fev1, fvc_pred=fvc_theorique)
         print(resultat)
+
+        # 4. Affichage visuel des courbes
+        tracer_courbes_spirometrie(debit_filtre)
