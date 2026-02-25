@@ -33,6 +33,7 @@ def acquerir_donnees_serie(port='/dev/ttyUSB0', baudrate=115200):
             print("✅ Capteur détecté ! Envoi du signal d'initialisation...")
             ser.write(b'START\n')
             print(f"Acquisition de {N_SAMPLES} échantillons en cours (~10 secondes)...")
+            print("⏳ Veuillez souffler dans le spiromètre dès que vous êtes prêt...")  
 
             while len(donnees_brutes) < N_SAMPLES:
                 if ser.in_waiting > 0:
@@ -300,57 +301,6 @@ def generer_donnees_simulees(profil="sain"):
     return donnees
 
 
-def calculer_fvc_theorique(age, taille_cm, sexe):
-    """
-    Calcule une estimation simplifiée du FVC théorique attendu (en Litres).
-    (Basé sur des équations spirométriques standards simplifiées de l'ERS/ATS)
-    """
-    taille_m = taille_cm / 100.0
-    if sexe.lower() == 'homme':
-        # Formule simplifiée pour homme
-        fvc_pred = (5.76 * taille_m) - (0.026 * age) - 4.34
-    elif sexe.lower() == 'femme':
-        # Formule simplifiée pour femme
-        fvc_pred = (4.43 * taille_m) - (0.026 * age) - 2.89
-    else:
-        fvc_pred = None
-    
-    return fvc_pred
-
-
-
-def diagnostiquer_patient(fvc, fev1, fvc_pred=None):
-    """
-    Génère un diagnostic clinique préliminaire basé sur l'indice de Tiffeneau
-    et la comparaison avec le FVC théorique.
-    """
-    if fvc <= 0:
-        return "Erreur : Capacité Vitale (FVC) invalide."
-
-    ratio = (fev1 / fvc) * 100
-
-    print("\n--- ANALYSE CLINIQUE ---")
-    print(f"Indice de Tiffeneau (FEV1/FVC) : {ratio:.1f} %")
-    
-    # 1. Test de l'obstruction
-    if ratio < 70.0:
-        diagnostic = "⚠️ PROFIL OBSTRUCTIF SUSPECTÉ (ex: Asthme, BPCO)."
-        # On peut affiner la sévérité avec le FEV1 par rapport à un FEV1 prédit
-    else:
-        # 2. Test de la restriction (nécessite la valeur théorique)
-        if fvc_pred:
-            pourcentage_fvc = (fvc / fvc_pred) * 100
-            print(f"FVC mesuré vs théorique : {pourcentage_fvc:.1f} %")
-            
-            if pourcentage_fvc < 80.0:
-                diagnostic = "⚠️ PROFIL RESTRICTIF SUSPECTÉ (Capacité pulmonaire réduite)."
-            else:
-                diagnostic = "✅ PROFIL NORMAL (Aucune anomalie respiratoire majeure détectée)."
-        else:
-            diagnostic = "❕ PROFIL NORMAL/INDÉTERMINÉ (Ratio normal, mais FVC théorique manquant pour écarter une restriction)."
-
-    return diagnostic
-
 
 def calculer_fvc_theorique(age, taille_cm, sexe):
     """
@@ -488,7 +438,7 @@ if __name__ == '__main__':
 
     # 2. Acquisition (simulée ou matérielle)
     # Changez "sain" par "obstructif" ou "restrictif" pour tester l'algorithme !
-    donnees = generer_donnees_simulees(profil="sain") # pour l'acquisition réelle
+    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0') # pour l'acquisition réelle
     # donnees = generer_donnees_simulees(profil="sain") # pour les tests sans matériel physique
     
     #Avant de lancer le script, il devra identifier le numéro attribué à la carte ESP32 :
@@ -519,3 +469,4 @@ if __name__ == '__main__':
 
         # 4. Affichage visuel des courbes
         tracer_courbes_spirometrie(debit_filtre)
+        
