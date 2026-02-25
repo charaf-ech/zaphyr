@@ -469,4 +469,5 @@ if __name__ == '__main__':
 
         # 4. Affichage visuel des courbes
         tracer_courbes_spirometrie(debit_filtre)
-        
+    else:
+        print("\n❌ Aucune donnée valide n'a été acquise. Veuillez vérifier la connexion du capteur et réessayer.")
