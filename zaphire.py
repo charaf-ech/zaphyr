@@ -449,7 +449,7 @@ if __name__ == '__main__':
 
     
     
-    if np.any(donnees):
+    if np.any(donnees) and donnees is not None :
         print("\nTraitement des données en cours...")
         debit = convertir_en_debit(donnees)
         debit_compense = compenser_perte_charge(debit)
