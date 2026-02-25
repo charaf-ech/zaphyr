@@ -253,35 +253,49 @@ def resoudre_colebrook(Re, rugosite_relative):
 
 
 
-def generer_donnees_simulees():
+def generer_donnees_simulees(profil="sain"):
     """
-    Génère 10 000 points de données simulant une expiration physiologique
-    pour tester l'algorithme sans le capteur physique MXP5010DP.
+    Génère 10 000 points de données simulant une expiration physiologique.
+    Modifie l'équation mathématique selon le profil clinique choisi.
     """
-    print("Génération d'un signal physiologique simulé...")
-    donnees = np.ones(N_SAMPLES) * 250  # Ligne de base (bruit de fond de l'ADC)
+    print(f"❕ Mode SIMULATION activé (Profil généré : {profil.upper()})...")
+    donnees = np.ones(N_SAMPLES) * 250 
     
-    # Ajout d'un bruit blanc aléatoire pour simuler les imperfections du capteur
+    # Ajout d'un léger bruit électronique aléatoire
     bruit = np.random.normal(0, 5, N_SAMPLES)
     donnees += bruit
     
-    # Simulation d'un souffle qui commence à la 2ème seconde (index 2000)
     debut_souffle = 2000
-    duree_souffle = 5000  # Le souffle dure 5 secondes
+    duree_souffle = 5000 
     
+    # --- DÉFINITION DES PROFILS CLINIQUES ---
+    if profil == "sain":
+        # Poumons volumineux qui se vident vite (FVC haut, Ratio haut)
+        A = 18000
+        k = 4.5
+    elif profil == "obstructif":
+        # L'air a du mal à sortir : expiration très lente (FEV1 très faible, FVC normal/bas)
+        A = 12000
+        k = 1.5 
+        duree_souffle = 7000 # Le patient met plus de temps à vider ses poumons
+    elif profil == "restrictif":
+        # Les poumons sont petits mais les bronches sont ouvertes (FVC très bas, Ratio haut)
+        A = 7000
+        k = 6.0
+    else:
+        # Profil par défaut
+        A = 12000
+        k = 4.0
+    
+    # Génération de la courbe
     for i in range(duree_souffle):
-        t = i / FE  # Temps écoulé en secondes depuis le début du souffle
-        # Modèle mathématique d'un souffle : P(t) = A * t * exp(-k*t)
-        # Ces constantes génèrent une courbe qui ressemble à un vrai signal de spirométrie
-        valeur_souffle = 12000 * t * np.exp(-4 * t) 
-        
-        # On ajoute le souffle à la ligne de base
+        t = i / FE 
+        valeur_souffle = A * t * np.exp(-k * t) 
         if debut_souffle + i < N_SAMPLES:
             donnees[debut_souffle + i] += valeur_souffle
             
-    # L'ADC de l'ESP32 est limité entre 0 et 4095
+    # Limiter aux valeurs de l'ADC de l'ESP32 (12 bits)
     donnees = np.clip(donnees, 0, 4095)
-    
     return donnees
 
 
@@ -424,9 +438,12 @@ if __name__ == '__main__':
     
     # 1. Saisie des données du patient avant de lancer l'acquisition
     age_patient, taille_patient, sexe_patient = demander_informations_patient()
-    
+
     # 2. Acquisition (simulée ou matérielle)
-    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0')  # donnees = generer_donnees_simulees() # pour les tests sans matériel physique
+    # Changez "sain" par "obstructif" ou "restrictif" pour tester l'algorithme !
+    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0') # pour l'acquisition réelle
+    # donnees = generer_donnees_simulees(profil="sain") # pour les tests sans matériel physique
+    
     #Avant de lancer le script, il devra identifier le numéro attribué à la carte ESP32 :
 #Brancher la carte en USB.
 #Faire un clic droit sur le menu Démarrer et ouvrir le Gestionnaire de périphériques.
