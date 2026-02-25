@@ -207,13 +207,17 @@ def extraire_parametres_spirometrie(debit_filtre):
         index_fin += 1
 
     # 3. Calculer la Capacité Vitale Forcée (FVC) via la méthode des trapèzes
-    # CORRECTION ICI : np.trapz devient np.trapezoid
-    fvc_m3 = np.trapezoid(debit_filtre[index_debut:index_fin], dx=1 / FE)
+    if hasattr(np, 'trapezoid'):
+        fvc_m3 = np.trapezoid(debit_filtre[index_debut:index_fin], dx=1 / FE)
+    else:
+        fvc_m3 = np.trapz(debit_filtre[index_debut:index_fin], dx=1 / FE)
 
     # 4. Calculer le Volume Expiratoire Maximal Seconde (FEV1)
     index_1s = min(index_debut + int(1.0 * FE), index_fin)
-    # CORRECTION ICI : np.trapz devient np.trapezoid
-    fev1_m3 = np.trapezoid(debit_filtre[index_debut:index_1s], dx=1 / FE)
+    if hasattr(np, 'trapezoid'):
+        fev1_m3 = np.trapezoid(debit_filtre[index_debut:index_1s], dx=1 / FE)
+    else:
+        fev1_m3 = np.trapz(debit_filtre[index_debut:index_1s], dx=1 / FE)
 
     # 5. Conversions d'unités (m^3 vers Litres, et m^3/s vers L/min)
     fvc_litres = fvc_m3 * 1000.0
@@ -438,8 +442,8 @@ if __name__ == '__main__':
 
     # 2. Acquisition (simulée ou matérielle)
     # Changez "sain" par "obstructif" ou "restrictif" pour tester l'algorithme !
-    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0') # pour l'acquisition réelle
     # donnees = generer_donnees_simulees(profil="sain") # pour les tests sans matériel physique
+    donnees = acquerir_donnees_serie(port='/dev/ttyUSB0') # pour l'acquisition réelle
     
     #Avant de lancer le script, il devra identifier le numéro attribué à la carte ESP32 :
 #Brancher la carte en USB.
@@ -449,7 +453,7 @@ if __name__ == '__main__':
 
     
     
-    if np.any(donnees) and donnees is not None :
+    if donnees is not None and np.any(donnees) :
         print("\nTraitement des données en cours...")
         debit = convertir_en_debit(donnees)
         debit_compense = compenser_perte_charge(debit)
