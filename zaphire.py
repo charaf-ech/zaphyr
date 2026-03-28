@@ -1,8 +1,8 @@
 import serial
 import time
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import signal
+import numpy as np # type: ignore
+import matplotlib.pyplot as plt # type: ignore
+from scipy import signal # type: ignore
 
 # --- CONSTANTES PHYSIQUES ET MATÉRIELLES ---
 RHO = 1.204  # Densité de l'air en kg/m3 aux conditions standards [cite: 86]
